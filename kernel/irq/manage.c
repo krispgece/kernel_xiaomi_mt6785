@@ -1199,8 +1199,25 @@ static void affine_one_perf_thread(struct irqaction *action)
 	if (!action->thread)
 		return;
 
+	/*
+	 * set_cpus_allowed_ptr() can require a cross-CPU migration via
+	 * stop_one_cpu(), which depends on per-CPU stopper threads that
+	 * are not guaranteed to be up yet for drivers probed this early
+	 * (e.g. built-in drivers during kernel_init_freeable(), before
+	 * SYSTEM_RUNNING). Calling it then can crash the scheduler.
+	 * Skip the affinity hint in that window; it is only a QoS/perf
+	 * optimization, not required for correct operation.
+	 */
+	if (system_state < SYSTEM_RUNNING)
+		return;
+
 	if (action->flags & IRQF_PERF_AFFINE)
 		mask = cpu_perf_mask;
+	else
+		mask = cpu_all_mask;
+
+	if (!cpumask_intersects(mask, cpu_online_mask))
+		mask = cpu_online_mask;
 
 	action->thread->flags |= PF_PERF_CRITICAL;
 	set_cpus_allowed_ptr(action->thread, mask);
