@@ -1175,6 +1175,25 @@ int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 		}
 	}
 
+	/*
+	 * MediaTek LK reads the recovery image header on a normal boot too and
+	 * prepends its cmdline to the boot image's. A TWRP-style recovery
+	 * carries androidboot.selinux=permissive, and init on a userdebug
+	 * build honours it, so the system boots permissive until a vendor rc
+	 * flips /sys/fs/selinux/enforce much later. Blank the flag out here so
+	 * init never sees it and ro.boot.selinux is not set at all. Recovery
+	 * boots its own kernel and is not affected.
+	 */
+	{
+		static const char sel_perm[] = "androidboot.selinux=permissive";
+		char *s = cmdline;
+
+		while ((s = strstr(s, sel_perm)) != NULL) {
+			memset(s, ' ', sizeof(sel_perm) - 1);
+			s += sizeof(sel_perm) - 1;
+		}
+	}
+
 	pr_debug("Command line is: %s\n", (char*)data);
 
 	rng_seed = of_get_flat_dt_prop(node, "rng-seed", &l);
