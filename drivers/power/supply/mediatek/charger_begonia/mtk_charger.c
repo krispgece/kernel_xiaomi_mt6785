@@ -1065,11 +1065,6 @@ int charger_manager_get_quick_charge_type(void)
 	if (pinfo == NULL)
 		return 0;
 
-	/* quick charge type detected is too fast to
-	 * update real type */
-//	mdelay(1500);
-	msleep(1500);
-
 	return smblib_get_quick_charge_type(pinfo);
 }
 

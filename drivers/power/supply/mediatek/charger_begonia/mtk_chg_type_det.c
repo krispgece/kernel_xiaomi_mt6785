@@ -846,6 +846,14 @@ static int mt_charger_resume(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct mt_charger *mt_charger = platform_get_drvdata(pdev);
 
+	/*
+	 * Nothing attached: plug events reach userspace through the
+	 * TCPC/BC1.2 path, so refreshing all four supplies here only
+	 * keeps the system awake after every resume.
+	 */
+	if (mt_charger->chg_type == CHARGER_UNKNOWN)
+		return 0;
+
 	power_supply_changed(mt_charger->chg_psy);
 	power_supply_changed(mt_charger->ac_psy);
 	power_supply_changed(mt_charger->usb_psy);
