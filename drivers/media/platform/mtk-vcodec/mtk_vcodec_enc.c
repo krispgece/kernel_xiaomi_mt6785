@@ -1912,6 +1912,26 @@ static int mtk_venc_encode_header(void *priv)
 	return 0;
 }
 
+/*
+ * begonia ships the Android 11 vpud, which takes several encoder settings only
+ * as part of the initial VENC_SET_PARAM_ENC config and rejects them as runtime
+ * changes ("venc_set_param: unsupported param id"). Newer Codec2 userspace
+ * sends them after start anyway. Failing the whole encode on that leaves every
+ * recording empty, so treat a rejected optional setting as a warning and keep
+ * the value from the initial config.
+ */
+static int mtk_venc_set_optional_param(struct mtk_vcodec_ctx *ctx,
+				       enum venc_set_param_type type,
+				       struct venc_enc_param *enc_prm)
+{
+	int ret = venc_if_set_param(ctx, type, enc_prm);
+
+	if (ret)
+		mtk_v4l2_err("[%d] runtime param %d rejected (%d), ignored",
+			     ctx->id, type, ret);
+	return 0;
+}
+
 static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 {
 	struct venc_enc_param enc_prm;
@@ -1995,7 +2015,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 			       ctx->id,
 			       mtk_buf->vb.vb2_buf.index,
 			       mtk_buf->enc_params.nonrefp);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					 VENC_SET_PARAM_NONREFP,
 					 &enc_prm);
 	}
@@ -2005,7 +2025,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 		mtk_v4l2_debug(1, "[%d] idx=%d, change param nonrefpfreq=%d",
 			       ctx->id, mtk_buf->vb.vb2_buf.index,
 			       mtk_buf->enc_params.nonrefpfreq);
-		ret |= venc_if_set_param(
+		ret |= mtk_venc_set_optional_param(
 				ctx, VENC_SET_PARAM_NONREFPFREQ, &enc_prm);
 	}
 
@@ -2016,7 +2036,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.detectframerate);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_DETECTED_FRAMERATE,
 					&enc_prm);
 	}
@@ -2028,7 +2048,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.rfs);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_RFS_ON,
 					&enc_prm);
 	}
@@ -2040,7 +2060,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.prependheader);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_PREPEND_SPSPPS_TO_IDR,
 					&enc_prm);
 	}
@@ -2052,7 +2072,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.operationrate);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_OPERATION_RATE,
 					&enc_prm);
 	}
@@ -2064,7 +2084,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.bitratemode);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_BITRATE_MODE,
 					&enc_prm);
 	}
@@ -2076,7 +2096,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.roion);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_ROI_ON,
 					&enc_prm);
 	}
@@ -2088,7 +2108,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.heif_grid_size);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_HEIF_GRID_SIZE,
 					&enc_prm);
 	}
@@ -2102,7 +2122,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				mtk_buf->vb.vb2_buf.index,
 				enc_prm.color_desc->color_primaries,
 				enc_prm.color_desc->full_range);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_COLOR_DESC,
 					&enc_prm);
 	}
@@ -2114,7 +2134,7 @@ static int mtk_venc_param_change(struct mtk_vcodec_ctx *ctx)
 				ctx->id,
 				mtk_buf->vb.vb2_buf.index,
 				mtk_buf->enc_params.tsvc);
-		ret |= venc_if_set_param(ctx,
+		ret |= mtk_venc_set_optional_param(ctx,
 					VENC_SET_PARAM_TSVC,
 					&enc_prm);
 	}
