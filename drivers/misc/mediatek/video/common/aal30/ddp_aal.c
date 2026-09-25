@@ -237,6 +237,34 @@ static u32 aal_sram_method = AAL_SRAM_EOF;
 module_param(aal_sram_method, uint, 0644);
 MODULE_PARM_DESC(aal_sram_method, "aal config sram method");
 
+/*
+ * begonia: video-mode panels start a frame every 16.7 ms and on MT6785 the
+ * mutex SOF handler hands AALService a fresh DRE 3.0 histogram every frame,
+ * whether or not anything changed. While no new frame and no backlight
+ * change (framework or AAL side) has happened for aal_idle_holdoff_ms,
+ * deliver only one histogram in aal_idle_hist_div. 1 = stock behaviour.
+ */
+static u32 aal_idle_hist_div = 6;
+module_param(aal_idle_hist_div, uint, 0644);
+MODULE_PARM_DESC(aal_idle_hist_div, "deliver 1 of N DRE3 histograms when idle");
+static u32 aal_idle_holdoff_ms = 250;
+module_param(aal_idle_holdoff_ms, uint, 0644);
+MODULE_PARM_DESC(aal_idle_holdoff_ms, "full histogram rate after activity (ms)");
+static unsigned long g_aal_last_activity;
+static unsigned int g_aal_idle_hist_cnt;
+
+static bool disp_aal_idle_hist_skip(void)
+{
+	const u32 div = READ_ONCE(aal_idle_hist_div);
+
+	if (div <= 1 ||
+	    time_before(jiffies, READ_ONCE(g_aal_last_activity) +
+			msecs_to_jiffies(READ_ONCE(aal_idle_holdoff_ms))))
+		return false;
+
+	return (++g_aal_idle_hist_cnt % div) != 0;
+}
+
 #else
 static struct DISP_AAL_HIST g_aal_hist_multi_pipe;
 /* Locked by  g_aal#_hist_lock */
@@ -280,6 +308,13 @@ do { \
 #ifdef AAL_HAS_DRE3
 static atomic_t g_aal_change_to_dre30 = ATOMIC_INIT(0);
 #endif
+
+static inline void disp_aal_mark_activity(void)
+{
+#ifdef CONFIG_MTK_DRE30_SUPPORT
+	WRITE_ONCE(g_aal_last_activity, jiffies);
+#endif
+}
 
 #ifdef AAL_SUPPORT_KERNEL_API
 static atomic_t g_aal_panel_type = ATOMIC_INIT(CONFIG_BY_CUSTOM_LIB);
@@ -518,6 +553,7 @@ static void disp_aal_notify_frame_dirty(enum DISP_MODULE_ENUM module)
 	disp_aal_exit_idle(__func__, 0);
 
 	spin_lock_irqsave(&g_aal_irq_en_lock, flags);
+	disp_aal_mark_activity();
 	/* Interrupt can be disabled until dirty histogram is retrieved */
 	atomic_set(&g_aal_dirty_frame_retrieved[index], 0);
 	disp_aal_set_interrupt_by_module(module, 1);
@@ -822,7 +858,9 @@ static void disp_aal_update_dre3_sram(enum DISP_MODULE_ENUM module,
 	dre_blk_y_num =	aal_min(AAL_BLK_MAX_ALLOWED_NUM/dre_blk_x_num,
 		    (read_value >> 5) & 0x1F);
 
-	if (spin_trylock_irqsave(&g_aal_hist_lock, flags)) {
+	if (disp_aal_idle_hist_skip()) {
+		/* Static screen: skip this histogram, keep writing the gain */
+	} else if (spin_trylock_irqsave(&g_aal_hist_lock, flags)) {
 		result = disp_aal_read_dre3(dre_blk_x_num, dre_blk_y_num);
 		if (result) {
 			g_aal_dre30_hist.dre_blk_x_num = dre_blk_x_num;
@@ -1448,6 +1486,7 @@ void disp_aal_notify_backlight_changed(int bl_1024)
 		bl_1024 = max_backlight;
 
 	atomic_set(&g_aal_backlight_notified, bl_1024);
+	disp_aal_mark_activity();
 
 	service_flags = 0;
 	if (bl_1024 == 0) {
@@ -1540,6 +1579,8 @@ static int disp_aal_copy_hist_to_user(struct DISP_AAL_HIST __user *hist)
 
 static struct DISP_AAL_INITREG g_aal_init_regs;
 static struct DISP_AAL_PARAM g_aal_param;
+/* Only AALService (SET_PARAM ioctl) touches this */
+static int g_aal_last_final_bl = -1;
 
 static int disp_aal_set_init_reg(struct DISP_AAL_INITREG __user *user_regs,
 	enum DISP_MODULE_ENUM module, void *cmdq)
@@ -1703,6 +1744,11 @@ int disp_aal_set_param(struct DISP_AAL_PARAM __user *param,
 	if (copy_from_user(&g_aal_param, param,
 	sizeof(struct DISP_AAL_PARAM)) == 0) {
 		backlight_value = g_aal_param.FinalBacklight;
+		/* AAL-side backlight smoothing counts as activity */
+		if (backlight_value != g_aal_last_final_bl) {
+			g_aal_last_final_bl = backlight_value;
+			disp_aal_mark_activity();
+		}
 		/* set cabc gain zero when detect backlight */
 		/* setting equal to zero */
 		if (backlight_value == 0)
