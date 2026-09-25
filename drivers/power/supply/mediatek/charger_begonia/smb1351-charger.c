@@ -429,7 +429,8 @@ enum usbsw_state {
 static const enum power_supply_type const smblib_apsd_results[] = {
 	POWER_SUPPLY_TYPE_UNKNOWN,
 	POWER_SUPPLY_TYPE_USB,
-	POWER_SUPPLY_TYPE_USB_CDP,
+	/* CDP is still a PC port; real_type keeps reporting USB_CDP */
+	POWER_SUPPLY_TYPE_USB,
 	POWER_SUPPLY_TYPE_USB_FLOAT,
 	POWER_SUPPLY_TYPE_USB_DCP,
 };
@@ -711,7 +712,7 @@ static int smb1351_psy_chg_type_changed(struct smb1351_charger *chip, bool force
 		chip->chg_type == STANDARD_CHARGER)
 		return 0;
 
-	if (chip->chg_type > sizeof(smblib_apsd_results))
+	if (chip->chg_type >= ARRAY_SIZE(smblib_apsd_results))
 		chip->mt_chg->usb_desc.type = POWER_SUPPLY_TYPE_USB_DCP;
 	else
 		chip->mt_chg->usb_desc.type = smblib_apsd_results[chip->chg_type];
