@@ -1220,7 +1220,7 @@ static int vidioc_vdec_qbuf(struct file *file, void *priv,
 				ctx->input_max_ts);
 		}
 	} else {
-		if (buf->reserved2 == 0xFFFFFFFF)
+		if (buf->reserved2 == 0xFFFFFFFF || (int)buf->reserved2 <= 0)
 			mtkbuf->general_user_fd = -1;
 		else
 			mtkbuf->general_user_fd = (int)buf->reserved2;
@@ -1992,23 +1992,35 @@ static int vb2ops_vdec_buf_prepare(struct vb2_buffer *vb)
 				dma_buf_get(mtkbuf->general_user_fd);
 
 			if (IS_ERR(mtkbuf->frame_buffer.dma_general_buf)) {
-				mtk_v4l2_err("%s dma_general_buf is err 0x%p.\n",
-					__func__,
-					mtkbuf->frame_buffer.dma_general_buf);
-
-				mtk_vdec_queue_error_event(ctx);
-				return -EINVAL;
+				/*
+				 * The Android 12 Codec2 decoder blob does not use
+				 * the Android 11 general-buffer convention (where a
+				 * reserved2 of -1 means "none"), so this optional
+				 * per-frame HDR10+/CUVA metadata buffer fd cannot be
+				 * resolved here. It is not needed to decode: the
+				 * common decode path already fully supports having no
+				 * general buffer (it sends general_buf_fd = -1 to the
+				 * firmware). Disable it for this frame and carry on
+				 * instead of killing the whole decode session, the
+				 * same way the encoder path only ever touches
+				 * reserved2 behind an explicit HDR_META/ROI flag.
+				 */
+				mtk_v4l2_debug(0,
+					"%s general_buf fd %d unusable, decoding without it",
+					__func__, mtkbuf->general_user_fd);
+				mtkbuf->frame_buffer.dma_general_buf = 0;
+				mtkbuf->general_user_fd = -1;
+			} else {
+				buf_att = dma_buf_attach(
+					mtkbuf->frame_buffer.dma_general_buf,
+					&ctx->dev->plat_dev->dev);
+				sgt = dma_buf_map_attachment(buf_att, DMA_TO_DEVICE);
+				mtkbuf->frame_buffer.dma_general_addr =
+					sg_dma_address(sgt->sgl);
+				dma_buf_unmap_attachment(buf_att, sgt, DMA_TO_DEVICE);
+				dma_buf_detach(mtkbuf->frame_buffer.dma_general_buf,
+					buf_att);
 			}
-
-			buf_att = dma_buf_attach(
-				mtkbuf->frame_buffer.dma_general_buf,
-				&ctx->dev->plat_dev->dev);
-			sgt = dma_buf_map_attachment(buf_att, DMA_TO_DEVICE);
-			mtkbuf->frame_buffer.dma_general_addr =
-				sg_dma_address(sgt->sgl);
-			dma_buf_unmap_attachment(buf_att, sgt, DMA_TO_DEVICE);
-			dma_buf_detach(mtkbuf->frame_buffer.dma_general_buf,
-				buf_att);
 
 		} else
 			mtkbuf->frame_buffer.dma_general_buf = 0;
