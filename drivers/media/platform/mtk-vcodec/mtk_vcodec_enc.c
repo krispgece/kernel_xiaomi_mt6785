@@ -232,6 +232,36 @@ static int vidioc_venc_check_supported_profile_level(__u32 fourcc,
 	return false;
 }
 
+/*
+ * begonia ships the Android 11 vpud. At an operation rate of 120 or more it
+ * puts the instance into its own slow-motion (SMVR) mode, which was built
+ * for the Android 11 OMX encoder and its 4-frame batches:
+ *  - the frame path in libvpud_vcodec.so then asks for the bitstream buffer
+ *    without mapping it into vpud (its CPU address stays NULL), because in
+ *    that mode only the hardware is expected to write it;
+ *  - libvcodecdrv still copies the SPS/PPS (H.264) or VPS/SPS/PPS (H.265)
+ *    it prepends to the first IDR frame into that buffer with the CPU, so
+ *    the first frame writes through a NULL pointer and vpud takes SIGSEGV
+ *    (h264_enc_encode_Frame / VENC_PrependHeader);
+ *  - H.264 also switches to temporal SVC there, and the codec config it
+ *    returns then starts with a scalability-info SEI, which MPEG4Writer does
+ *    not accept in avcC.
+ * The newer Codec2 encoder (Android 12 rosemary blobs) sets the capture rate
+ * as the operation rate - 120 for MiuiCamera slow motion - and feeds one
+ * frame per buffer, so vpud's batch mode does not fit it. Cap the rate just
+ * below that threshold: the instance then runs the same per-frame path as a
+ * 30/60 fps recording, with the buffer mapped. The slow-motion timing is not
+ * affected; it comes from the time-stretched timestamps Codec2 writes.
+ *
+ * Capping it here, where the control is stored, keeps everything that reads
+ * the rate consistent: the initial VENC_SET_PARAM_ENC config, the runtime
+ * VENC_SET_PARAM_OPERATION_RATE (both arm SMVR in libvcodecdrv), and the
+ * DVFS code, which would otherwise plan each job as a 4-frame pack and hold
+ * the clock at 450 MHz. Rates below 120 (normal recording, screen recording,
+ * ViLTE) are left untouched.
+ */
+#define MTK_VENC_A11_VPUD_SMVR_OPRATE	120
+
 static int vidioc_venc_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mtk_vcodec_ctx *ctx = ctrl_to_ctx(ctrl);
@@ -399,6 +429,11 @@ static int vidioc_venc_s_ctrl(struct v4l2_ctrl *ctrl)
 			"V4L2_CID_MPEG_MTK_ENCODE_OPERATION_RATE: %d",
 			ctrl->val);
 		p->operationrate = ctrl->val;
+		if (p->operationrate >= MTK_VENC_A11_VPUD_SMVR_OPRATE) {
+			p->operationrate = MTK_VENC_A11_VPUD_SMVR_OPRATE - 1;
+			mtk_v4l2_debug(0, "[%d] operation rate %d capped to %d (A11 vpud SMVR mode)",
+				       ctx->id, ctrl->val, p->operationrate);
+		}
 		ctx->param_change |= MTK_ENCODE_PARAM_OPERATION_RATE;
 		break;
 	case V4L2_CID_MPEG_VIDEO_BITRATE_MODE:
