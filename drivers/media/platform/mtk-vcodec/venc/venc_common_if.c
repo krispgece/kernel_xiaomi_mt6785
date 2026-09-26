@@ -452,6 +452,41 @@ static int venc_get_param(unsigned long handle,
 	return ret;
 }
 
+/*
+ * begonia ships the Android 11 vpud. Its HEVC driver handles every
+ * prepend-header setting (VENC_SET_PARAM_PREPEND_HEADER and
+ * VENC_SET_PARAM_PREPEND_SPSPPS_TO_IDR, whatever the value) by switching
+ * the instance to GCE sync mode. vpud reports the mode to us in
+ * vsi->sync_mode only on the VENC_SET_PARAM_ENC and SCENARIO paths, though,
+ * and the newer Codec2 encoder sends the prepend setting after the initial
+ * config (the V4L2 control setup at open marks it changed, so it goes out
+ * with the first frame). After that, nobody returns an encoded buffer:
+ *  - vpud in GCE sync mode no longer sends VCU_IPIMSG_ENC_PUT_BUFFER, and it
+ *    fills vsi->list_free after an encode only if vsi->sync_mode is set;
+ *  - we still run in async mode and only collect buffers on PUT_BUFFER.
+ * Every H.265 recording then stalls after the first frames and stays empty.
+ *
+ * Finish the switch vpud started: flag sync mode in the vsi, so vpud fills
+ * vsi->list_free before it acks each encode, and collect the buffers after
+ * each encode like any sync mode instance. PUT_BUFFER stays off in this
+ * mode, so no buffer is returned twice. Only do this after vpud accepted
+ * the setting: with vpud still in async mode, the flag would make it return
+ * each buffer twice. The H.264 driver switches only for a value of 1 (which
+ * VENC_SET_PARAM_PREPEND_HEADER always sends) and is left alone here.
+ */
+static void venc_h265_prepend_sync_mode(struct venc_inst *inst)
+{
+	if (inst->vcu_inst.id != IPI_VENC_H265)
+		return;
+
+	if (!inst->vsi->sync_mode)
+		pr_info("[MTK_VCODEC][%d]: %s() H.265 prepend header set, vpud switched to GCE sync mode\n",
+			inst->ctx->id, __func__);
+
+	inst->vsi->sync_mode = 1;
+	inst->ctx->async_mode = 0;
+}
+
 static int venc_set_param(unsigned long handle,
 	enum venc_set_param_type type,
 	struct venc_enc_param *enc_prm)
@@ -532,6 +567,8 @@ static int venc_set_param(unsigned long handle,
 	case VENC_SET_PARAM_PREPEND_HEADER:
 		inst->prepend_hdr = 1;
 		ret = vcu_enc_set_param(&inst->vcu_inst, type, enc_prm);
+		if (!ret)
+			venc_h265_prepend_sync_mode(inst);
 		break;
 	case VENC_SET_PARAM_COLOR_DESC:
 		memcpy(&inst->vsi->config.color_desc, enc_prm->color_desc,
@@ -540,6 +577,8 @@ static int venc_set_param(unsigned long handle,
 		break;
 	default:
 		ret = vcu_enc_set_param(&inst->vcu_inst, type, enc_prm);
+		if (!ret && type == VENC_SET_PARAM_PREPEND_SPSPPS_TO_IDR)
+			venc_h265_prepend_sync_mode(inst);
 		inst->ctx->async_mode = !(inst->vsi->sync_mode);
 		break;
 	}
