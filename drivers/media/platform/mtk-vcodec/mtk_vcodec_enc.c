@@ -496,9 +496,26 @@ static int vidioc_venc_s_ctrl(struct v4l2_ctrl *ctrl)
 		p->b_qp = ctrl->val;
 		break;
 	case V4L2_CID_MPEG_VIDEO_ENABLE_TSVC:
-		mtk_v4l2_debug(0, "V4L2_CID_MPEG_VIDEO_ENABLE_TSVC");
-		p->tsvc = ctrl->val;
-		ctx->param_change |= MTK_ENCODE_PARAM_TSVC;
+		/*
+		 * Keep temporal SVC off. When this reaches the init config,
+		 * begonia's Android 11 vpud turns on H.264 temporal SVC and
+		 * puts an SVC prefix NAL unit (type 14) in front of the
+		 * slices. The codec config then carries more than SPS/PPS,
+		 * MPEG4Writer rejects it ("Only SPS and PPS Nal units are
+		 * expected", then "Missing codec specific data") and the
+		 * camera throws the recording away.
+		 *
+		 * The Android 12 Codec2 encoder sets this control; with it in
+		 * the init config vpud reported tsvc 8. Whether the value
+		 * lands in the init config or only arrives later as a runtime
+		 * parameter (which vpud rejects) depends on timing, so the
+		 * same recording worked or failed depending on how much the
+		 * encoder logged. Nothing on this device uses temporal SVC:
+		 * camera, screen recording and ViLTE all encode one layer.
+		 */
+		mtk_v4l2_debug(0, "V4L2_CID_MPEG_VIDEO_ENABLE_TSVC %d ignored",
+			       ctrl->val);
+		p->tsvc = 0;
 		break;
 	default:
 		mtk_v4l2_err("ctrl-id=%d not support!", ctrl->id);
