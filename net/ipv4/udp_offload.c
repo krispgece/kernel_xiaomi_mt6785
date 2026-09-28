@@ -400,6 +400,14 @@ struct sk_buff *udp_gro_receive(struct list_head *head, struct sk_buff *skb,
 	int flush = 1;
 
 	if (!sk || !udp_sk(sk)->gro_receive) {
+		/*
+		 * Merge plain UDP only for sockets that asked for it with
+		 * UDP_GRO, as upstream does. Merging every flow is harmless
+		 * for normal sockets, which get the packets split again, but
+		 * a raw socket sees one datagram carrying several packets.
+		 */
+		if (!sk || !udp_sk(sk)->gro_enabled)
+			goto out;
 		pp = call_gro_receive(udp_gro_receive_segment, head, skb);
 		return pp;
 	}
