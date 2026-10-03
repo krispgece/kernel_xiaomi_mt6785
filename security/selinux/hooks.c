@@ -111,7 +111,9 @@ static int __init enforcing_setup(char *str)
 {
 	unsigned long enforcing;
 	if (!kstrtoul(str, 0, &enforcing))
-		selinux_enforcing_boot = enforcing ? 1 : 0;
+		selinux_enforcing_boot =
+			selinux_stay_permissive(enforcing ? 1 : 0,
+						"the command line");
 	return 1;
 }
 __setup("enforcing=", enforcing_setup);

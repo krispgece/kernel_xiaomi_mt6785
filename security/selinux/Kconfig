@@ -60,6 +60,30 @@ config SECURITY_SELINUX_DEVELOP
 	  permissive mode (if permitted by the policy) via
 	  /sys/fs/selinux/enforce.
 
+config SECURITY_SELINUX_STAY_PERMISSIVE
+	bool "Keep SELinux permissive (recovery kernels only)"
+	depends on SECURITY_SELINUX_DEVELOP
+	default n
+	help
+	  Keep the kernel in permissive mode for its whole uptime. A request
+	  to enforce, enforcing=1 on the kernel command line or a write of 1
+	  to /sys/fs/selinux/enforce, still succeeds but leaves the kernel
+	  permissive, and /sys/fs/selinux/enforce keeps reading 0. Each such
+	  request is logged with one line in the kernel log.
+
+	  Say Y only for a kernel that goes into a recovery image. MediaTek
+	  LK reads the recovery image header on a normal boot too and
+	  prepends its command line to the boot image's, so a recovery that
+	  asks for androidboot.selinux=permissive there makes every system
+	  it boots permissive as well. With this option the recovery stays
+	  permissive without that flag. Android init then asks for enforcing
+	  mode and treats a failed write as fatal, so the request is
+	  accepted rather than refused.
+
+	  Never enable this in a kernel that boots the system.
+
+	  If unsure, say N.
+
 config SECURITY_SELINUX_AVC_STATS
 	bool "NSA SELinux AVC Statistics"
 	depends on SECURITY_SELINUX

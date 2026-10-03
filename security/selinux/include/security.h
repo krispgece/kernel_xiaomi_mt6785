@@ -152,6 +152,27 @@ static inline void enforcing_set(struct selinux_state *state, bool value)
 }
 #endif
 
+#ifdef CONFIG_SECURITY_SELINUX_STAY_PERMISSIVE
+/*
+ * Recovery kernels only: LK prepends the recovery header's command line to
+ * every normal boot, so the recovery cannot ask for permissive mode there.
+ * Accept a request to enforce, log it and drop it. Refusing it is no option,
+ * as Android init treats a failed setenforce as fatal.
+ */
+static inline int selinux_stay_permissive(int enforce, const char *who)
+{
+	if (enforce)
+		pr_info("SELinux:  enforcing mode requested by %s, staying permissive\n",
+			who);
+	return 0;
+}
+#else
+static inline int selinux_stay_permissive(int enforce, const char *who)
+{
+	return enforce;
+}
+#endif
+
 #ifdef CONFIG_SECURITY_SELINUX_DISABLE
 static inline bool selinux_disabled(struct selinux_state *state)
 {
